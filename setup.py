@@ -12,4 +12,5 @@ setup(name = "spp_idr",
       packages = find_packages(),
       scripts = ['scripts/run_idr.py'],
       install_requires = ["pysam >= 0.4.1",
-                          "nose >= 1.3.0"])
+                          "nose >= 1.3.0",
+                          "ipython-cluster-helper"])
