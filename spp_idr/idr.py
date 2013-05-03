@@ -252,21 +252,6 @@ def idr_on_peak_files(peak_files, idr_runner, subdir):
     out_files = map(idr_runner, pairs_to_run, [subdir] * len(pairs_to_run))
     return out_files
 
-def call_peaks(controls, experimental, peak_caller, mapper=map):
-    individual_peaks = call_peaks_on_individual_replicates(controls,
-                                                           experimental,
-                                                           peak_caller, mapper)
-    pooled_peaks = call_peaks_on_pooled_replicates(controls,
-                                                   experimental,
-                                                   peak_caller)
-    pseudo_peaks = call_peaks_on_pseudo_replicates(controls,
-                                                   experimental,
-                                                   peak_caller, mapper)
-    pooled_pseudo_peaks = call_peaks_on_pooled_pseudoreplicates(controls,
-                                                                experimental,
-                                                                peak_caller)
-    return individual_peaks, pooled_peaks, pseudo_peaks, pooled_pseudo_peaks
-
 def call_peaks_on_pseudo_replicates(controls, experimental, peak_caller, mapper):
     pooled_controls = tagalign_pool(controls)
     pseudo_replicates = mapper(tagalign_split, experimental)
@@ -280,10 +265,10 @@ def call_peaks_on_individual_replicates(controls, experimental, peak_caller, map
     peaks = mapper(peak_caller, [pooled_controls] * len(experimental), experimental)
     return peaks
 
-def call_peaks_on_pooled_replicates(controls, experimental, peak_caller):
+def call_peaks_on_pooled_replicates(controls, experimental, peak_caller, mapper):
     pooled_controls = tagalign_pool(controls)
     pooled_experimental = tagalign_pool(experimental)
-    peaks = peak_caller(pooled_controls, pooled_experimental)
+    peaks = mapper(peak_caller, [pooled_controls], [pooled_experimental])
     return peaks
 
 def call_peaks_on_pooled_pseudoreplicates(controls, experimental, peak_caller, mapper):
@@ -413,15 +398,6 @@ def _open_sam_or_bam(in_file):
         raise ValueError("in_file is not a samfile or a bamfile")
         sys.exit(1)
     return pysam.Samfile(in_file, flag)
-
-def gunzip(fname):
-    base, ext = os.path.splitext(fname)
-    if ext != ".gz":
-        return fname
-    else:
-        with open(fname, 'rb') as in_handle, open(base, 'wb') as out_handle:
-            out_handle.writelines(in_handle)
-        return base
 
 def safe_makedir(dname):
     """Make a directory if it doesn't exist, handling concurrent race conditions.
@@ -615,5 +591,16 @@ def bunch(iterable, n=2, fillvalue=None):
     args = [iter(iterable)] * n
     return map(list, itertools.izip_longest(fillvalue=fillvalue, *args))
 
-def mask(df, f):
-    return df[f(df)]
+
+def download_to_dir(url, dirname, extract=True, remove=True):
+    cur_dir = os.cur_dir()
+    os.chdir(dirname)
+    cl = ["wget", url]
+    subprocess.check_call(cl)
+    if extract:
+        cl = ["tar", "-xzvpf", os.path.basename(url)]
+        subprocess.check_call(cl)
+    if remove:
+        os.remove(os.path.basename(url))
+    os.chdir(cur_dir)
+    return os.path.basename(url)
