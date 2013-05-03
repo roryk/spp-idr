@@ -89,13 +89,13 @@ def call_peaks(controls, experimental, peak_caller, mapper=map):
                                                            peak_caller, mapper)
     pooled_peaks = call_peaks_on_pooled_replicates(controls,
                                                    experimental,
-                                                   peak_caller)
+                                                   peak_caller, mapper)
     pseudo_peaks = call_peaks_on_pseudo_replicates(controls,
                                                    experimental,
                                                    peak_caller, mapper)
     pooled_pseudo_peaks = call_peaks_on_pooled_pseudoreplicates(controls,
                                                                 experimental,
-                                                                peak_caller)
+                                                                peak_caller, mapper)
     return individual_peaks, pooled_peaks, pseudo_peaks, pooled_pseudo_peaks
 
 
