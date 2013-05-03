@@ -42,3 +42,9 @@ test/obs
 
 # emacs temporary file
 .#*
+# nfs temporary files
+.nfs*
+# ipython-cluster-helper files
+bcbio*
+*engine*
+*controller*
