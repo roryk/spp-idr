@@ -6,23 +6,194 @@ import subprocess
 import time
 import itertools
 import gzip
-import sh
+import collections
+import csv
+import pandas as pd
 
-def flag_problem_replicates():
-    pass
+"""
+From: http://genome.ucsc.edu/FAQ/FAQformat.html#format12
+This format is used to provide called peaks of signal enrichment based on pooled,
+normalized (interpreted) data. It is a BED6+4 format.
+
+    chrom - Name of the chromosome (or contig, scaffold, etc.).
+    chromStart - The starting position of the feature in the chromosome or scaffold.
+        The first base in a chromosome is numbered 0.
+    chromEnd - The ending position of the feature in the chromosome or scaffold.
+        The chromEnd base is not included in the display of the feature. For example,
+        the first 100 bases of a chromosome are defined as chromStart=0, chromEnd=100,
+        and span the bases numbered 0-99.
+    name - Name given to a region (preferably unique). Use '.' if no name is assigned.
+    score - Indicates how dark the peak will be displayed in the browser (0-1000).
+        If all scores were '0' when the data were submitted to the DCC, the DCC assigned
+        scores 1-1000 based on signal value. Ideally the average signalValue per base
+        spread is between 100-1000.
+    strand - +/- to denote strand or orientation (whenever applicable). Use '.' if
+        no orientation is assigned.
+    signalValue - Measurement of overall (usually, average) enrichment for the region.
+    pValue - Measurement of statistical significance (-log10). Use -1 if no pValue
+        is assigned.
+    qValue - Measurement of statistical significance using false discovery rate (-log10).
+        Use -1 if no qValue is assigned.
+    peak - Point-source called for this peak; 0-based offset from chromStart.
+        Use -1 if no point-source called.
+
+Here is an example of narrowPeak format:
+
+track type=narrowPeak visibility=3 db=hg19 name="nPk" description="ENCODE narrowPeak Example"
+browser position chr1:9356000-9365000
+chr1    9356548 9356648 .       0       .       182     5.0945  -1  50
+chr1    9358722 9358822 .       0       .       91      4.6052  -1  40
+chr1    9361082 9361182 .       0       .       182     9.2103  -1  75
+"""
+
+NARROWPEAK_HEADER = ["chrom", "chromStart", "chromEnd", "name", "score",
+                     "strand", "signalValue", "pValue", "qValue", "peak"]
+
+IDR_HEADER = ["chr1", "start1", "stop1", "sig.value1", "chr2", "start2", "stop2",
+              "sig.value2", "idr.local", "IDR"]
+
+REPLICATE_PASS = "PASS"
+REPLICATE_WARNING = "WARNING"
+REPLICATE_FAIL = "FAIL"
+
+REPLICATE_WARNING_THRESHOLD = 2
+REPLICATE_FAIL_THRESHOLD = 20
+
+def run_analysis(control_files, experimental_files, spp_path,
+                 idr_runner_path, idr_plotter_path, mapper):
+
+    # convert to tagalign
+    control = map(bam_to_tagalign, control_files)
+    experimental = map(bam_to_tagalign, experimental_files)
+
+    # call peaks
+    peak_caller = spp_peak_caller(spp_path, cores=1)
+    i_peaks, p_peaks, pseudo_peaks, pp_peaks = call_peaks(control,
+                                                          experimental,
+                                                          peak_caller,
+                                                          mapper)
+    # run idr
+    idr_run = idr_runner(idr_runner_path)
+    i_idr, p_idr, pp_idr = run_idr(i_peaks, p_peaks, pp_peaks, idr_run)
+    idr_plot = idr_plotter(idr_plotter_path)
+    plots = plot_idr_output(i_idr, p_idr, pp_idr, idr_plot)
+
+    # filter peaks
+    filtered_files = filter_peaks(p_peaks, (i_idr, p_idr, pp_idr), peak_caller.npeaks)
+    return plots, filtered_files
+
+
+def call_peaks(controls, experimental, peak_caller, mapper=map):
+    individual_peaks = call_peaks_on_individual_replicates(controls,
+                                                           experimental,
+                                                           peak_caller, mapper)
+    pooled_peaks = call_peaks_on_pooled_replicates(controls,
+                                                   experimental,
+                                                   peak_caller)
+    pseudo_peaks = call_peaks_on_pseudo_replicates(controls,
+                                                   experimental,
+                                                   peak_caller, mapper)
+    pooled_pseudo_peaks = call_peaks_on_pooled_pseudoreplicates(controls,
+                                                                experimental,
+                                                                peak_caller)
+    return individual_peaks, pooled_peaks, pseudo_peaks, pooled_pseudo_peaks
+
+
+def filter_peaks(peak_file, idr_set, npeaks):
+    peak_file = gunzip(peak_file)
+    sorted_peak_file = sort_peak_file(peak_file)
+    conservative, optimum = get_filter_thresholds(idr_set, npeaks)
+    conservative_peak_file = filter_peak_file(sorted_peak_file, conservative,
+                                              "-conservative")
+    optimum_peak_file = filter_peak_file(sorted_peak_file, optimum, "-optimum")
+    return conservative_peak_file, optimum_peak_file
+
+def sort_peak_file(peak_file):
+    base, ext = os.path.splitext(peak_file)
+    out_file = base + "-sorted" + ext
+    df = pd.io.parsers.read_csv(peak_file, sep="\t", names=NARROWPEAK_HEADER)
+    df = df.sort("signalValue", ascending=False)
+    df.to_csv(out_file, sep="\t", index=False, header=False)
+    return out_file
+
+def filter_peak_file(sorted_peak_file, threshold, suffix):
+    base, ext = os.path.splitext(sorted_peak_file)
+    out_file = base + suffix + ext
+    df = pd.io.parsers.read_csv(sorted_peak_file, sep="\t", names=NARROWPEAK_HEADER)
+    filtered = df.head(threshold)
+    filtered.to_csv(out_file, sep="\t", index=False)
+    return out_file
+
+def get_filter_thresholds(idr_set, npeaks):
+    replicate_idr, pseudoreplicate_idr, pooled_pseudo_idr = idr_set
+    original_replicate_threshold  = _original_replicate_threshold(replicate_idr,
+                                                                  npeaks)[0]
+    pooled_pseudoreplicate_threshold = _pooled_pseudoreplicate_threshold(pooled_pseudo_idr,
+                                                                         npeaks)[0]
+    conservative = original_replicate_threshold
+    optimum = max([original_replicate_threshold, pooled_pseudoreplicate_threshold])
+    return conservative, optimum
+
+def get_peak_count_thresholds(idr_set, npeaks):
+    replicate_idr, pseudoreplicate_idr, pooled_pseudo_idr = idr_set
+    original_replicate_threshold  = _original_replicate_threshold(replicate_idr,
+                                                                  npeaks)
+    consistency_thresholds = count_pseudoreplicate_peaks(pseudoreplicate_idr,
+                                                         npeaks)
+    pooled_pseudoreplicate_threshold = _pooled_pseudoreplicate_threshold(pooled_pseudo_idr,
+                                                                         npeaks)
+    return (original_replicate_threshold, consistency_thresholds,
+            pooled_pseudoreplicate_threshold)
+
+
+def report_problem_replicates(replicates_with_flags):
+   for item in replicates_with_flags:
+       if item[1] == REPLICATE_WARNING:
+           sys.stderr.write("%s has a self-consistency out of line with the other "
+                            "replicates.")
+       elif item[1] == REPLICATE_FAIL:
+            sys.stderr.write("%s has a self-consistency way out of line with the other "
+                             "replicates.")
+
+def _original_replicate_threshold(replicate_peak_files, npeaks):
+    peaks = count_replicate_peaks(replicate_peak_files, npeaks)
+    return [max(peaks)]
+
+def _pooled_pseudoreplicate_threshold(pooled_pseudo_peak_file, npeaks):
+    return count_pooled_replicate_peaks(pooled_pseudo_peak_file, npeaks)
+
+
+def flag_problem_replicates(idr_files, npeaks):
+    peaks = count_pseudoreplicate_peaks(idr_files, npeaks)
+    mean_peaks = float(sum(peaks)) / len(peaks)
+    distances = [abs(x - mean_peaks) for x in mean_peaks]
+    flags = map(_replicate_flag, distances)
+    return zip(idr_files, flags)
+
+def _replicate_flag(distance_from_mean):
+    if distance_from_mean > REPLICATE_FAIL_THRESHOLD:
+        return REPLICATE_FAIL
+    elif distance_from_mean > REPLICATE_WARNING_THRESHOLD:
+        return REPLICATE_WARNING
+    else:
+        return REPLICATE_PASS
+
 
 def count_pseudoreplicate_peaks(idr_files, npeaks):
     threshold = select_self_consistency_threshold(npeaks)
-    counts = []
-    for idr_set in idr_files:
-        counts.append(map(count_peaks_passing_threshold, idr_set,
-                          [threshold] * len(idr_set)))
-    return counts
+    return map(count_peaks_passing_threshold, idr_files,
+               [threshold] * len(idr_files))
 
 def count_replicate_peaks(idr_individual, npeaks):
     threshold = select_self_consistency_threshold(npeaks)
     return map(count_peaks_passing_threshold, idr_individual,
                [threshold] * len(idr_individual))
+
+
+def count_pooled_replicate_peaks(idr_pooled, npeaks):
+    threshold = select_pooled_consistency_threshold(npeaks)
+    return map(count_peaks_passing_threshold, idr_pooled,
+               [threshold] * len(idr_pooled))
 
 def select_pooled_consistency_threshold(npeaks, large_genome=True):
     if npeaks >= 150000 and large_genome:
@@ -41,58 +212,72 @@ def select_self_consistency_threshold(npeaks, large_genome=True, shallow=False):
         return 0.02
 
 def count_peaks_passing_threshold(peak_file, threshold):
+    peak_file = gunzip(peak_file)
     counter = 0
-    def line_passes_threshold(line):
-        x = line.split("\t")
-        print x
-        return float(x[11]) > threshold
 
     with open(peak_file) as in_handle:
-        for line in in_handle:
-            if line_passes_threshold(line):
+        peakreader = csv.DictReader(in_handle, delimiter=" ",
+                                    fieldnames=IDR_HEADER)
+        # skip the header
+        peakreader.next()
+        for line in peakreader:
+            if float(line['IDR']) < threshold:
+                counter += 1
+    return counter
+
+def count_peaks(peak_file):
+    peak_file = gunzip(peak_file)
+    counter = 0
+    with open(peak_file) as in_handle:
+        peakreader = csv.DictReader(in_handle, delimiter="\t",
+                                    fieldnames=NARROWPEAK_HEADER)
+        for line in peakreader:
                 counter += 1
     return counter
 
 def run_idr(individual_peaks, pseudo_peaks, pooled_pseudo_peaks, idr_runner):
     idr_individual = idr_on_peak_files(individual_peaks, idr_runner, "reps")
-    idr_pseudo = map(idr_on_peak_files, pseudo_peaks, [idr_runner] * len(pseudo_peaks),
-                     ["pseudo"] * len(pseudo_peaks))
+    idr_pseudo = map(idr_on_peak_files, pseudo_peaks, [idr_runner] * len(list(pseudo_peaks)),
+                     ["pseudo"] * len(list(pseudo_peaks)))
+    idr_pseudo = list(flatten(idr_pseudo))
     idr_pooled_pseudo = idr_on_peak_files(pooled_pseudo_peaks,
                                           idr_runner,
                                           "pooled_pseudo")
     return idr_individual, idr_pseudo, idr_pooled_pseudo
 
-def idr_on_peak_files(peak_files, idr_runner, out_subdir="reps"):
+def idr_on_peak_files(peak_files, idr_runner, subdir):
     peak_files = map(gunzip, peak_files)
-    pairs_to_run = itertools.combinations_with_replacement(peak_files, 2)
-    out_files = map(idr_runner, pairs_to_run, [out_subdir] * len(pairs_to_run))
+    pairs = list(itertools.combinations_with_replacement(peak_files, 2))
+    pairs_to_run = [x for x in pairs if x[0] != x[1]]
+    out_files = map(idr_runner, pairs_to_run, [subdir] * len(pairs_to_run))
     return out_files
 
-def call_peaks(controls, experimental, peak_caller):
+def call_peaks(controls, experimental, peak_caller, mapper=map):
     individual_peaks = call_peaks_on_individual_replicates(controls,
                                                            experimental,
-                                                           peak_caller)
+                                                           peak_caller, mapper)
     pooled_peaks = call_peaks_on_pooled_replicates(controls,
                                                    experimental,
                                                    peak_caller)
     pseudo_peaks = call_peaks_on_pseudo_replicates(controls,
                                                    experimental,
-                                                   peak_caller)
+                                                   peak_caller, mapper)
     pooled_pseudo_peaks = call_peaks_on_pooled_pseudoreplicates(controls,
                                                                 experimental,
                                                                 peak_caller)
     return individual_peaks, pooled_peaks, pseudo_peaks, pooled_pseudo_peaks
 
-def call_peaks_on_pseudo_replicates(controls, experimental, peak_caller):
+def call_peaks_on_pseudo_replicates(controls, experimental, peak_caller, mapper):
     pooled_controls = tagalign_pool(controls)
-    pseudo_replicates = map(tagalign_split, experimental)
-    peaks = map(peak_caller, [pooled_controls] * len(pseudo_replicates),
-                pseudo_replicates)
-    return peaks
+    pseudo_replicates = mapper(tagalign_split, experimental)
+    flat_replicates = list(flatten(pseudo_replicates))
+    peaks = mapper(peak_caller, [pooled_controls] * len(flat_replicates),
+                flat_replicates)
+    return bunch(peaks)
 
-def call_peaks_on_individual_replicates(controls, experimental, peak_caller):
+def call_peaks_on_individual_replicates(controls, experimental, peak_caller, mapper):
     pooled_controls = tagalign_pool(controls)
-    peaks = map(peak_caller, [pooled_controls] * len(experimental), experimental)
+    peaks = mapper(peak_caller, [pooled_controls] * len(experimental), experimental)
     return peaks
 
 def call_peaks_on_pooled_replicates(controls, experimental, peak_caller):
@@ -101,11 +286,11 @@ def call_peaks_on_pooled_replicates(controls, experimental, peak_caller):
     peaks = peak_caller(pooled_controls, pooled_experimental)
     return peaks
 
-def call_peaks_on_pooled_pseudoreplicates(controls, experimental, peak_caller):
+def call_peaks_on_pooled_pseudoreplicates(controls, experimental, peak_caller, mapper):
     pooled_controls = tagalign_pool(controls)
     pooled_experimental = tagalign_pool(experimental)
     pseudo_replicates = tagalign_split(pooled_experimental)
-    peaks = map(peak_caller, [pooled_controls] * len(pseudo_replicates),
+    peaks = mapper(peak_caller, [pooled_controls] * len(pseudo_replicates),
                 pseudo_replicates)
     return peaks
 
@@ -124,13 +309,28 @@ def spp_peak_caller(spp_path, npeak=300000, cores=1):
     peak_caller = SPPPeakCaller(spp_path, npeak, cores)
     return peak_caller
 
+def idr_runner(idr_runner_path):
+    runner = IDRRunner(idr_runner_path)
+    return runner
+
+def idr_plotter(idr_plotter_path):
+    runner = IDRPlotter(idr_plotter_path)
+    return runner
+
+def plot_idr_output(individual, pseudo, pooled_pseudo, idr_plotter):
+    indiv_plot = idr_plotter(individual)
+    pseudo_plots = idr_plotter(pseudo)
+    pooled_pseudo = idr_plotter(pooled_pseudo)
+    return indiv_plot, pseudo_plots, pooled_pseudo
 
 def _get_subdir(in_file, dirname):
     in_file_dir = os.path.dirname(in_file)
     return os.path.join(in_file_dir, dirname)
 
 def bam_to_tagalign(in_file, out_file=None):
-    base, _ = os.path.splitext(in_file)
+    base, ext = os.path.splitext(in_file)
+    if ext == ".tagAlign":
+        return in_file
     if out_file is None:
         out_file = base + ".tagAlign"
 
@@ -185,6 +385,12 @@ def _get_strand_of_read(read):
         return "-"
     else:
         return "+"
+
+def is_peak_file(in_file):
+    base, ext = os.path.splitext(in_file)
+    if ext == ".gz":
+        _, ext = os.path.splitext(base)
+    return ext == ".regionPeak"
 
 def is_tagalign(in_file):
     _, ext = os.path.splitext(in_file)
@@ -283,7 +489,8 @@ class SPPPeakCaller(object):
         cores = self.cores
         cmd = ("Rscript {spp_path} -c={experimental} -i={control} "
                "-npeak={npeak} -odir={odir} -savr -savp -rf -out={stats} "
-               "-x=-500:85 -p={cores}")
+               "-x=-500:85")
+        # -p={cores}")
         cmd_string = cmd.format(**locals())
         return cmd_string
 
@@ -294,6 +501,8 @@ class SPPPeakCaller(object):
         return "_VS_".join(comparisons)
 
     def _get_stats_file(self, control_file, experimental_file):
+        sys.stderr.write(control_file)
+        sys.stderr.write(str(experimental_file))
         comparison_name = self._get_comparison_name(control_file,
                                                     experimental_file)
         stats_dir = _get_subdir(experimental_file, "stats")
@@ -302,7 +511,7 @@ class SPPPeakCaller(object):
     def _get_peaks_file(self, control, experimental):
         odir = _get_subdir(control, "peaks")
         out_file = (self._get_comparison_name(control, experimental) +
-                    ".regionPeaks.gz")
+                    ".regionPeak.gz")
         return os.path.join(odir, out_file)
 
     def __call__(self, control, experimental):
@@ -313,54 +522,98 @@ class SPPPeakCaller(object):
         return peaks_file
 
 class IDRRunner(object):
-    def __init__(self, idr_path, results_subdir="reps"):
+    def __init__(self, idr_path):
         self.idr_path = idr_path
+        self.idr_dir = os.path.dirname(idr_path)
+        self.idr_file = os.path.basename(idr_path)
         self.map = map
-        self.results_subdir = results_subdir
 
     def set_map_function(self, mapper):
         self.map = mapper
 
-    def _run_idr(self, pair):
+    def _run_idr(self, pair, out_dir):
         pair = map(gunzip, pair)
-        out_file = self._get_out_file(pair)
-        spp_path = self.spp_path
+        out_prefix = self._get_out_prefix(pair, out_dir)
+        idr_path = self.idr_file
         p0 = pair[0]
         p1 = pair[1]
-        cmd = ("Rscript {spp_path} {p0} {p1} -1 {out_file} 0 F signal.value")
+        cur_dir = os.getcwd()
+        os.chdir(self.idr_dir)
+        cmd = ("Rscript {idr_path} {p0} {p1} -1 {out_prefix} 0 F signal.value")
         cmd_string = cmd.format(**locals())
         subprocess.check_call(cmd_string, shell=True)
-        return out_file
+        os.chdir(cur_dir)
+        return self._get_out_file(pair, out_dir)
 
-    def _get_out_file(self, pair):
-        parent_dir = os.path.dirname(os.path.dirname(pair[0]))
-        out_dir = os.path.join(parent_dir, "idr", self.results_subdir)
+    def _get_out_prefix(self, pair, out_dir):
+        base_dir = os.path.dirname(pair[0])
+        out_dir = os.path.join(base_dir, "idr", out_dir)
         safe_makedir(out_dir)
-        p1 = pair[0].split("_")[0]
-        p2 = pair[1].split("_")[0]
+        p1 = os.path.basename(pair[0]).split("_VS")[0]
+        p2 = os.path.basename(pair[1]).split("_VS")[0]
         return os.path.join(out_dir, "_VS_".join([p1, p2]))
 
-    def __call__(self, peak_files):
-        idr_file = self.map(self._run_idr, [peak_files])
+    def _get_out_file(self, pair, out_dir):
+        prefix = self._get_out_prefix(pair, out_dir)
+        return prefix + "-overlapped-peaks.txt"
+
+    def __call__(self, peak_files, out_dir="reps"):
+        idr_file = self._run_idr(peak_files, out_dir)
         return idr_file
 
-def IDRPlotter(object):
+class IDRPlotter(object):
     def __init__(self, idr_plotter_path):
-        self.idr_plotter_path
+        self.idr_plotter_path = idr_plotter_path
+        self.idr_dir = os.path.dirname(idr_plotter_path)
+        self.idr_plot_file = os.path.basename(idr_plotter_path)
         self.map = map
 
     def set_map_function(self, mapper):
         self.map = mapper
 
-    def _run_idrplotter(self, idr_files, out_file):
-        idr_plotter_path = self.idr_plotter_path
+    def _get_out_prefix(self, idr_files):
+        base_dir = os.path.dirname(idr_files[0])
+        pieces = [os.path.basename(x).split("-overlapped")[0] for x in idr_files]
+        return os.path.join(base_dir, "_VS_".join(pieces))
+
+    def _run_idrplotter(self, idr_files, prefix):
+        idr_plotter_path = self.idr_plot_file
         idr_string = " ".join(idr_files)
         n = len(idr_files)
-        cmd = ("Rscript {idr_plotter_path} {n} {out_file} {idr_string}")
+        cur_dir = os.getcwd()
+        os.chdir(self.idr_dir)
+        cmd = ("Rscript {idr_plotter_path} {n} {prefix} {idr_string}")
         cmd_string = cmd.format(**locals())
         subprocess.check_call(cmd_string, shell=True)
+        os.chdir(cur_dir)
+        out_file = prefix + "-plot.ps"
         return out_file
 
-    def __call__(self, idr_files, out_file):
-        idr_plot = self.map(self._run_idrplotter, idr_files, [out_file])
+    def __call__(self, idr_files):
+        #        prefix = os.path.commonprefix(idr_files)
+        prefix = self._get_out_prefix(idr_files)
+        idr_plot = self._run_idrplotter(idr_files, prefix)
         return idr_plot
+
+def flatten(l):
+    """
+    flatten an irregular list of lists
+    example: flatten([[[1, 2, 3], [4, 5]], 6]) -> [1, 2, 3, 4, 5, 6]
+    lifted from: http://stackoverflow.com/questions/2158395/
+
+    """
+    for el in l:
+        if isinstance(el, collections.Iterable) and not isinstance(el,
+                                                                   basestring):
+            for sub in flatten(el):
+                yield sub
+        else:
+            yield el
+
+def bunch(iterable, n=2, fillvalue=None):
+    "bunch(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
+    args = [iter(iterable)] * n
+    return map(list, itertools.izip_longest(fillvalue=fillvalue, *args))
+
+def mask(df, f):
+    return df[f(df)]
