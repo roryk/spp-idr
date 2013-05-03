@@ -22,6 +22,7 @@ scheduler = "lsf"
 queue = "hsph"
 jobs = 5
 NPEAKS = 300000
+DATA_URL = "https://dl.dropboxusercontent.com/u/2822886/spp/spp_idr_test_data.tar.gz"
 
 
 class TestBamfileOperations(unittest.TestCase):
@@ -139,6 +140,8 @@ class TestCombinationCallers(unittest.TestCase):
 
 def setUp(self):
     idr.safe_makedir(test_dir)
+    if not idr.file_exists(control_file):
+        idr.download_to_dir(DATA_URL, data_dir)
 
 def test_run_idr():
     individual_peaks = glob.glob(os.path.join(peak_dir, 'ctcf_[0-9]_VS_*.gz'))
