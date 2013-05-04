@@ -37,28 +37,28 @@ python install-tools.py --tool_path=tools
 ```
 # Usage
 ## Run locally
-'''
+```
 run_idr.py --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
-'''
+```
 
 ## Run on Platform LSF on queue 'default'
 You should set num-jobs to be twice the amount of BAM files you have.
-'''
+```
 run_idr.py --num-jobs 8 --lsf-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM BAM3 tool_path
-'''
+```
 
 ## Run on Sun Grid Engine (SGE) on queue 'default'
 You should set num-jobs to be twice the amount of BAM files you have.
-'''
+```
 run_idr.py --num-jobs 8 --sge-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
-'''
+```
 
 ## Run on Torque on queue 'default'
 You should set num-jobs to be twice the amount of BAM files you have.
-'''
+```
 run_idr.py --num-jobs 8 --torque-queue torque --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
-'''
-:w
+```
+
 ## Output
 This generates quite a lot of output files. The conservative set of peak calls and the optimum
 set of peak calls can be found in the peaks directory. There are also several diagnostic
