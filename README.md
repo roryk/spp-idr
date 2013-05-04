@@ -1,4 +1,9 @@
 # spp-idr: a wrapper around SPP and IDR to perform CHIP-seq analysis
+## The situation
+You have BAM files from a CHIP-seq experiment made with punctate chromatin marks such as
+H3k9ac, H3k27ac, H3k4me3, etc. and want to call a set of peaks reproducible across your
+replicates.
+
 This is a simplified implementation of the workflow sketched out here:
 https://sites.google.com/site/anshulkundaje/projects/idr
 
@@ -37,21 +42,27 @@ run_idr.py --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
 
 ## Run on Platform LSF on queue 'default'
+You should set num-jobs to be twice the amount of BAM files you have.
 '''
-run_idr.py --lsf-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM BAM3 tool_path
-'''
-
-## Run on Platform LSF on queue 'default'
-'''
-run_idr.py --lsf-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
+run_idr.py --num-jobs 8 --lsf-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM BAM3 tool_path
 '''
 
 ## Run on Sun Grid Engine (SGE) on queue 'default'
+You should set num-jobs to be twice the amount of BAM files you have.
 '''
-run_idr.py --sge-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
+run_idr.py --num-jobs 8 --sge-queue default --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
 
 ## Run on Torque on queue 'default'
+You should set num-jobs to be twice the amount of BAM files you have.
 '''
-run_idr.py --torque-queue torque --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
+run_idr.py --num-jobs 8 --torque-queue torque --control BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
+:w
+## Output
+This generates quite a lot of output files. The conservative set of peak calls and the optimum
+set of peak calls can be found in the peaks directory. There are also several diagnostic
+plots in the "peaks" directory which are important to look at to determine if the correct
+fragment length was calculated. You should look at those and make sure they look correct.
+In the "idr" directory there are several diagnostic plots which are also useful to look at
+to make sure the IDR process is working correctly.
