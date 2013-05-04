@@ -20,6 +20,9 @@ on a defined confidence of rank consistency and reproducibility of
 identifications i.e the IDR threshold.
 ```
 
+An intuitive overview of IDR can be found here:
+http://www.personal.psu.edu/users/q/u/qul12/IDR101.pdf
+
 # Installation
 ```
 git clone git@github.com:roryk/spp-idr.git
