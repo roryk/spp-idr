@@ -21,7 +21,8 @@ if __name__ == "__main__":
     parser.add_argument('--lsf-queue', help="LSF queue name")
     parser.add_argument('--sge-queue', help="SGE queue name")
     parser.add_argument('--torque-queue', help="Torque queue name")
-    parser.add_argument('--num-jobs', default=1, help="number of parallel jobs to run")
+    parser.add_argument('--num-jobs', default=1, help="number of parallel jobs to run",
+                        type=int)
     parser.add_argument('tool_path', help="Path to spp and idr installation.")
     args = parser.parse_args()
 
