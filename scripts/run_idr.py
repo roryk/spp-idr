@@ -26,6 +26,9 @@ if __name__ == "__main__":
     parser.add_argument('tool_path', help="Path to spp and idr installation.")
     args = parser.parse_args()
 
+    args.control = map(os.path.abspath, args.control)
+    args.experimental = map(os.path.abspath, args.experimental)
+
     if args.lsf_queue:
         with cluster_view("LSF", args.lsf_queue, args.num_jobs) as view:
             main(args.control, args.experimental, args.tool_path, view.map)
