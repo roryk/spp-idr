@@ -58,6 +58,7 @@ REPLICATE_FAIL = "FAIL"
 
 REPLICATE_WARNING_THRESHOLD = 2
 REPLICATE_FAIL_THRESHOLD = 20
+NPEAKS = 300000
 
 def run_analysis(control_files, experimental_files, spp_path,
                  idr_runner_path, idr_plotter_path, mapper):
@@ -455,7 +456,7 @@ def is_gzip(fname):
 # this is here for now to get around IPython < 1.0 not being able to pickle closures.
 class SPPPeakCaller(object):
 
-    def __init__(self, spp_path, npeaks, cores=1):
+    def __init__(self, spp_path, npeaks=NPEAKS, cores=1):
         self.spp_path = spp_path
         self.npeaks = npeaks
         self.map = map
