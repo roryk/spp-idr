@@ -33,25 +33,25 @@ python install-tools.py --tool_path=tools
 # Usage
 ## Run locally
 '''
-run_idr.py --controls BAM1, BAM2, BAM3 --experimental BAM1, BAM2, BAM3 tool_path
+run_idr.py --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
 
 ## Run on Platform LSF on queue 'default'
 '''
-run_idr.py --lsf-queue default --controls BAM1, BAM2, BAM3 --experimental BAM1, BAM2, BAM3 tool_path
+run_idr.py --lsf-queue default --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM BAM3 tool_path
 '''
 
 ## Run on Platform LSF on queue 'default'
 '''
-run_idr.py --lsf-queue default --controls BAM1, BAM2, BAM3 --experimental BAM1, BAM2, BAM3 tool_path
+run_idr.py --lsf-queue default --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
 
 ## Run on Sun Grid Engine (SGE) on queue 'default'
 '''
-run_idr.py --sge-queue default --controls BAM1, BAM2, BAM3 --experimental BAM1, BAM2, BAM3 tool_path
+run_idr.py --sge-queue default --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
 
 ## Run on Torque on queue 'default'
 '''
-run_idr.py --torque-queue torque --controls BAM1, BAM2, BAM3 --experimental BAM1, BAM2, BAM3 tool_path
+run_idr.py --torque-queue torque --controls BAM1 BAM2 BAM3 --experimental BAM1 BAM2 BAM3 tool_path
 '''
