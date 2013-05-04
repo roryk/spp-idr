@@ -22,7 +22,7 @@ if __name__ == "__main__":
     spp_file = idr.download_to_dir(FIXED_SPP_URL, os.path.join(args.tool_path,
                                                             "phantompeakqualtools"))
     cl = ["R", "CMD", "INSTALL", spp_file]
-    cur_dir = os.cur_dir()
+    cur_dir = os.getcwd()
     os.chdir(os.path.join(args.tool_path, "phantompeakqualtools"))
     subprocess.check_call(cl)
     os.chdir(cur_dir)
