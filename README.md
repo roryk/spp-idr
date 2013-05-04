@@ -1,4 +1,4 @@
-# spp-idr: a wrapper around SPP and IDR to perform CHIP-seq analysis
+# spp-idr: a wrapper around SPP and IDR for performing CHIP-seq analysis
 ## The situation
 You have BAM files from a CHIP-seq experiment made with punctate chromatin marks such as
 H3k9ac, H3k27ac, H3k4me3, etc. and want to call a set of peaks reproducible across your
