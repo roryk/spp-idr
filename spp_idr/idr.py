@@ -63,9 +63,11 @@ def run_analysis(control_files, experimental_files, spp_path,
                  idr_runner_path, idr_plotter_path, mapper):
 
     # convert to tagalign
+    print "Converting BAM files to tagAlign if necessary."
     control = map(bam_to_tagalign, control_files)
     experimental = map(bam_to_tagalign, experimental_files)
 
+    print "Calling peaks, this will take a while."
     # call peaks
     peak_caller = spp_peak_caller(spp_path, cores=1)
     i_peaks, p_peaks, pseudo_peaks, pp_peaks = call_peaks(control,
@@ -73,13 +75,17 @@ def run_analysis(control_files, experimental_files, spp_path,
                                                           peak_caller,
                                                           mapper)
     # run idr
+    print "Performing IDR analysis."
     idr_run = idr_runner(idr_runner_path)
-    i_idr, p_idr, pp_idr = run_idr(i_peaks, p_peaks, pp_peaks, idr_run)
+    i_idr, pseudo_idr, pp_idr = run_idr(i_peaks, pseudo_peaks, pp_peaks, idr_run)
     idr_plot = idr_plotter(idr_plotter_path)
-    plots = plot_idr_output(i_idr, p_idr, pp_idr, idr_plot)
+    plots = plot_idr_output(i_idr, pseudo_idr, pp_idr, idr_plot)
 
+    print "Filtering peaks using the cutoffs determined by IDR."
     # filter peaks
-    filtered_files = filter_peaks(p_peaks, (i_idr, p_idr, pp_idr), peak_caller.npeaks)
+    filtered_files = filter_peaks(p_peaks, (i_idr, pseudo_idr, pp_idr), peak_caller.npeaks)
+
+    print "Fin."
     return plots, filtered_files
 
 
@@ -100,7 +106,7 @@ def call_peaks(controls, experimental, peak_caller, mapper=map):
 
 
 def filter_peaks(peak_file, idr_set, npeaks):
-    peak_file = gunzip(peak_file)
+    peak_file = gunzip(peak_file[0])
     sorted_peak_file = sort_peak_file(peak_file)
     conservative, optimum = get_filter_thresholds(idr_set, npeaks)
     conservative_peak_file = filter_peak_file(sorted_peak_file, conservative,
@@ -111,6 +117,8 @@ def filter_peaks(peak_file, idr_set, npeaks):
 def sort_peak_file(peak_file):
     base, ext = os.path.splitext(peak_file)
     out_file = base + "-sorted" + ext
+    if file_exists(out_file):
+        return out_file
     df = pd.io.parsers.read_csv(peak_file, sep="\t", names=NARROWPEAK_HEADER)
     df = df.sort("signalValue", ascending=False)
     df.to_csv(out_file, sep="\t", index=False, header=False)
@@ -119,6 +127,8 @@ def sort_peak_file(peak_file):
 def filter_peak_file(sorted_peak_file, threshold, suffix):
     base, ext = os.path.splitext(sorted_peak_file)
     out_file = base + suffix + ext
+    if file_exists(out_file):
+        return out_file
     df = pd.io.parsers.read_csv(sorted_peak_file, sep="\t", names=NARROWPEAK_HEADER)
     filtered = df.head(threshold)
     filtered.to_csv(out_file, sep="\t", index=False)
@@ -156,6 +166,8 @@ def report_problem_replicates(replicates_with_flags):
                              "replicates.")
 
 def _original_replicate_threshold(replicate_peak_files, npeaks):
+    if not replicate_peak_files:
+        return [0]
     peaks = count_replicate_peaks(replicate_peak_files, npeaks)
     return [max(peaks)]
 
@@ -493,7 +505,9 @@ class SPPPeakCaller(object):
     def __call__(self, control, experimental):
         cmd = self._spp_peak_call_command(control, experimental)
         peaks_file = self._get_peaks_file(control, experimental)
-        stats_file = self._get_stats_file(control, experimental)
+        if file_exists(peaks_file):
+            return peaks_file
+        #stats_file = self._get_stats_file(control, experimental)
         self.map(self._call_peaks, [cmd])
         return peaks_file
 
@@ -514,12 +528,15 @@ class IDRRunner(object):
         p0 = pair[0]
         p1 = pair[1]
         cur_dir = os.getcwd()
+        out_file = self._get_out_file(pair, out_dir)
+        if file_exists(out_file):
+            return out_file
         os.chdir(self.idr_dir)
         cmd = ("Rscript {idr_path} {p0} {p1} -1 {out_prefix} 0 F signal.value")
         cmd_string = cmd.format(**locals())
         subprocess.check_call(cmd_string, shell=True)
         os.chdir(cur_dir)
-        return self._get_out_file(pair, out_dir)
+        return out_file
 
     def _get_out_prefix(self, pair, out_dir):
         base_dir = os.path.dirname(pair[0])
@@ -548,25 +565,30 @@ class IDRPlotter(object):
         self.map = mapper
 
     def _get_out_prefix(self, idr_files):
+        print "in plotter" + str(idr_files)
         base_dir = os.path.dirname(idr_files[0])
         pieces = [os.path.basename(x).split("-overlapped")[0] for x in idr_files]
         return os.path.join(base_dir, "_VS_".join(pieces))
 
     def _run_idrplotter(self, idr_files, prefix):
         idr_plotter_path = self.idr_plot_file
+        idr_files = [x.split("-overlapped")[0] for x in idr_files]
         idr_string = " ".join(idr_files)
         n = len(idr_files)
         cur_dir = os.getcwd()
+        out_file = prefix + "-plot.ps"
+        if file_exists(out_file):
+            return out_file
         os.chdir(self.idr_dir)
         cmd = ("Rscript {idr_plotter_path} {n} {prefix} {idr_string}")
         cmd_string = cmd.format(**locals())
         subprocess.check_call(cmd_string, shell=True)
         os.chdir(cur_dir)
-        out_file = prefix + "-plot.ps"
         return out_file
 
     def __call__(self, idr_files):
-        #        prefix = os.path.commonprefix(idr_files)
+        if not idr_files:
+            return []
         prefix = self._get_out_prefix(idr_files)
         idr_plot = self._run_idrplotter(idr_files, prefix)
         return idr_plot
@@ -593,7 +615,8 @@ def bunch(iterable, n=2, fillvalue=None):
 
 
 def download_to_dir(url, dirname, extract=True, remove=True):
-    cur_dir = os.cur_dir()
+    cur_dir = os.getcwd()
+    safe_makedir(dirname)
     os.chdir(dirname)
     cl = ["wget", url]
     subprocess.check_call(cl)

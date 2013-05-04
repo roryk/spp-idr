@@ -141,7 +141,7 @@ class TestCombinationCallers(unittest.TestCase):
 def setUp(self):
     idr.safe_makedir(test_dir)
     if not idr.file_exists(control_file):
-        idr.download_to_dir(DATA_URL, data_dir)
+        idr.download_to_dir(DATA_URL, os.curdir)
 
 def test_run_idr():
     individual_peaks = glob.glob(os.path.join(peak_dir, 'ctcf_[0-9]_VS_*.gz'))
