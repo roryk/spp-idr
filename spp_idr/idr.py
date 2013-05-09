@@ -65,8 +65,8 @@ def run_analysis(control_files, experimental_files, spp_path,
 
     # convert to tagalign
     print "Converting BAM files to tagAlign if necessary."
-    control = map(bam_to_tagalign, control_files)
-    experimental = map(bam_to_tagalign, experimental_files)
+    control = mapper(bam_to_tagalign, control_files)
+    experimental = mapper(bam_to_tagalign, experimental_files)
 
     print "Calling peaks, this will take a while."
     # call peaks
