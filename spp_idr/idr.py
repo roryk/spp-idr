@@ -65,8 +65,8 @@ def run_analysis(control_files, experimental_files, spp_path,
 
     # convert to tagalign
     print "Converting BAM files to tagAlign if necessary."
-    control = mapper(bam_to_tagalign, control_files)
-    experimental = mapper(bam_to_tagalign, experimental_files)
+    control, experimental = map_2d(bam_to_tagalign, [control_files,
+                                                     experimental_files], mapper)
 
     print "Calling peaks, this will take a while."
     # call peaks
@@ -628,3 +628,36 @@ def download_to_dir(url, dirname, extract=True, remove=True):
         os.remove(os.path.basename(url))
     os.chdir(cur_dir)
     return os.path.basename(url)
+
+def map_2d(fn, l, mapper=map):
+    """
+    maps a function over a list of lists and groups the results
+    at the end in the form of the original list of lists
+    x = [[1, 2], [3, 4, 5]]
+    list(map_2d(float, x)) -> [[1.0, 2.0], [3.0, 4.0, 5.0]]
+    """
+    def get_size(item):
+        if isinstance(item, basestring):
+            return 1
+        else:
+            return len(item)
+    orig_sizes = map(get_size, l)
+    results = iter(mapper(fn, (list(flatten(l)))))
+    grouped = []
+    for s in orig_sizes:
+        grouped.append(take(s, results))
+    return grouped
+
+def take(n, iterable):
+    """Return first n items of the iterable as a list
+
+        >>> take(3, range(10))
+        [0, 1, 2]
+        >>> take(5, range(3))
+        [0, 1, 2]
+
+    Effectively a short replacement for ``next`` based iterator consumption
+    when you want more than one item, but less than the whole iterator.
+
+    """
+    return list(itertools.islice(iterable, n))
