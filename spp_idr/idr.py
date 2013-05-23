@@ -85,6 +85,8 @@ def run_analysis(control_files, experimental_files, spp_path,
     print "Filtering peaks using the cutoffs determined by IDR."
     # filter peaks
     filtered_files = filter_peaks(p_peaks, (i_idr, pseudo_idr, pp_idr), peak_caller.npeaks)
+    print "Converting to BED format for use in IGV."
+    map(regionpeak_to_bed, filtered_files)
 
     print "Fin."
     return plots, filtered_files
@@ -343,6 +345,26 @@ def bam_to_tagalign(in_file, out_file=None):
 
     return out_file
 
+def regionpeak_to_bed(in_file, out_file=None):
+    in_file = gunzip(in_file)
+    assert is_regionpeakfile(in_file), ("regionpeak_to_bed needs a .regionPeak file, "
+                                        "got %s" % in_file)
+    if not out_file:
+        base, _ = os.path.splitext(in_file)
+        out_file = base + ".bed"
+    if file_exists(out_file):
+        return out_file
+    with open(in_file) as in_handle, open(out_file, 'w') as out_handle:
+        # skip header
+        in_handle.next()
+        for line in in_handle:
+            split = line.split("\t")
+            # SPP outputs floats sometimes instead of ints for the chromosome position
+            out_handle.write("\t".join([split[0], str(int(float(split[1]))),
+                                        str(int(float(split[2]))),
+                                        split[3], split[6]]) + "\n")
+    return out_file
+
 def tagalign_split(in_file, nfiles=2):
     "split a tagalign file into nfiles number of files, randomly writing reads"
     out_files = _get_tagalign_split_files(in_file, nfiles)
@@ -401,6 +423,10 @@ def is_bamfile(in_file):
 def is_samfile(in_file):
     _, ext = os.path.splitext(in_file)
     return ext == ".sam"
+
+def is_regionpeakfile(in_file):
+    _, ext = os.path.splitext(in_file)
+    return ext == ".regionPeak"
 
 def _open_sam_or_bam(in_file):
     if is_samfile(in_file):
