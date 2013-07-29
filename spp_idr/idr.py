@@ -645,7 +645,7 @@ def download_to_dir(url, dirname, extract=True, remove=True):
     cur_dir = os.getcwd()
     safe_makedir(dirname)
     os.chdir(dirname)
-    cl = ["wget", url]
+    cl = ["wget", "--no-check-certificate", url, "-O", os.path.basename(url)]
     subprocess.check_call(cl)
     if extract:
         cl = ["tar", "-xzvpf", os.path.basename(url)]

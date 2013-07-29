@@ -14,16 +14,17 @@ if __name__ == "__main__":
                         help="path to install tools to")
     args = parser.parse_args()
     idr.safe_makedir(args.tool_path)
+    print "Installing tools into %s." % (args.tool_path)
     print "Installing phantompeakqualtools."
     idr.download_to_dir(PHANTOMPEAKQUALTOOLS_URL, args.tool_path)
     print "Installing IDR."
     idr.download_to_dir(IDR_URL, args.tool_path)
     print "Installing fixed SPP."
-    spp_file = idr.download_to_dir(FIXED_SPP_URL, os.path.join(args.tool_path,
-                                                            "phantompeakqualtools"))
+    spp_file = idr.download_to_dir(FIXED_SPP_URL, args.tool_path, extract=False,
+                                   remove=False)
     cl = ["R", "CMD", "INSTALL", spp_file]
     cur_dir = os.getcwd()
-    os.chdir(os.path.join(args.tool_path, "phantompeakqualtools"))
+    os.chdir(args.tool_path)
     subprocess.check_call(cl)
     os.chdir(cur_dir)
     print "Installation of tools complete."
