@@ -12,28 +12,31 @@ import pandas as pd
 
 """
 From: http://genome.ucsc.edu/FAQ/FAQformat.html#format12
-This format is used to provide called peaks of signal enrichment based on pooled,
-normalized (interpreted) data. It is a BED6+4 format.
+This format is used to provide called peaks of signal enrichment based on
+pooled, normalized (interpreted) data. It is a BED6+4 format.
 
     chrom - Name of the chromosome (or contig, scaffold, etc.).
-    chromStart - The starting position of the feature in the chromosome or scaffold.
-        The first base in a chromosome is numbered 0.
-    chromEnd - The ending position of the feature in the chromosome or scaffold.
-        The chromEnd base is not included in the display of the feature. For example,
-        the first 100 bases of a chromosome are defined as chromStart=0, chromEnd=100,
-        and span the bases numbered 0-99.
-    name - Name given to a region (preferably unique). Use '.' if no name is assigned.
-    score - Indicates how dark the peak will be displayed in the browser (0-1000).
-        If all scores were '0' when the data were submitted to the DCC, the DCC assigned
-        scores 1-1000 based on signal value. Ideally the average signalValue per base
-        spread is between 100-1000.
-    strand - +/- to denote strand or orientation (whenever applicable). Use '.' if
-        no orientation is assigned.
-    signalValue - Measurement of overall (usually, average) enrichment for the region.
-    pValue - Measurement of statistical significance (-log10). Use -1 if no pValue
-        is assigned.
-    qValue - Measurement of statistical significance using false discovery rate (-log10).
-        Use -1 if no qValue is assigned.
+    chromStart - The starting position of the feature in the chromosome or
+        scaffold. The first base in a chromosome is numbered 0.
+    chromEnd - The ending position of the feature in the chromosome or
+        scaffold. The chromEnd base is not included in the display of the
+        feature. For example,
+        the first 100 bases of a chromosome are defined as chromStart=0,
+        chromEnd=100, and span the bases numbered 0-99.
+    name - Name given to a region (preferably unique). Use '.' if no name is
+        assigned.
+    score - Indicates how dark the peak will be displayed in the browser
+        (0-1000). If all scores were '0' when the data were submitted to the
+        DCC, the DCC assigned scores 1-1000 based on signal value. Ideally the
+        average signalValue per base spread is between 100-1000.
+    strand - +/- to denote strand or orientation (whenever applicable). Use '.'
+        if no orientation is assigned.
+    signalValue - Measurement of overall (usually, average) enrichment for the
+        region.
+    pValue - Measurement of statistical significance (-log10). Use -1 if no
+        pValue is assigned.
+    qValue - Measurement of statistical significance using false discovery rate
+        (-log10). Use -1 if no qValue is assigned.
     peak - Point-source called for this peak; 0-based offset from chromStart.
         Use -1 if no point-source called.
 
@@ -49,8 +52,8 @@ chr1    9361082 9361182 .       0       .       182     9.2103  -1  75
 NARROWPEAK_HEADER = ["chrom", "chromStart", "chromEnd", "name", "score",
                      "strand", "signalValue", "pValue", "qValue", "peak"]
 
-IDR_HEADER = ["chr1", "start1", "stop1", "sig.value1", "chr2", "start2", "stop2",
-              "sig.value2", "idr.local", "IDR"]
+IDR_HEADER = ["chr1", "start1", "stop1", "sig.value1", "chr2", "start2",
+              "stop2", "sig.value2", "idr.local", "IDR"]
 
 REPLICATE_PASS = "PASS"
 REPLICATE_WARNING = "WARNING"
@@ -60,13 +63,15 @@ REPLICATE_WARNING_THRESHOLD = 2
 REPLICATE_FAIL_THRESHOLD = 20
 NPEAKS = 300000
 
+
 def run_analysis(control_files, experimental_files, spp_path,
                  idr_runner_path, idr_plotter_path, mapper):
 
     # convert to tagalign
     print "Converting BAM files to tagAlign if necessary."
-    control, experimental = map_2d(bam_to_tagalign, [control_files,
-                                                     experimental_files], mapper)
+    control, experimental = map_2d(bam_to_tagalign,
+                                   [control_files, experimental_files],
+                                   mapper)
 
     print "Calling peaks, this will take a while."
     # call peaks
@@ -78,13 +83,15 @@ def run_analysis(control_files, experimental_files, spp_path,
     # run idr
     print "Performing IDR analysis."
     idr_run = idr_runner(idr_runner_path)
-    i_idr, pseudo_idr, pp_idr = run_idr(i_peaks, pseudo_peaks, pp_peaks, idr_run)
+    i_idr, pseudo_idr, pp_idr = run_idr(i_peaks, pseudo_peaks, pp_peaks,
+                                        idr_run)
     idr_plot = idr_plotter(idr_plotter_path)
     plots = plot_idr_output(i_idr, pseudo_idr, pp_idr, idr_plot)
 
     print "Filtering peaks using the cutoffs determined by IDR."
     # filter peaks
-    filtered_files = filter_peaks(p_peaks, (i_idr, pseudo_idr, pp_idr), peak_caller.npeaks)
+    filtered_files = filter_peaks(p_peaks, (i_idr, pseudo_idr, pp_idr),
+                                  peak_caller.npeaks)
     print "Converting to BED format for use in IGV."
     map(regionpeak_to_bed, filtered_files)
 
@@ -160,19 +167,21 @@ def get_peak_count_thresholds(idr_set, npeaks):
 
 
 def report_problem_replicates(replicates_with_flags):
-   for item in replicates_with_flags:
-       if item[1] == REPLICATE_WARNING:
-           sys.stderr.write("%s has a self-consistency out of line with the other "
-                            "replicates.")
-       elif item[1] == REPLICATE_FAIL:
-            sys.stderr.write("%s has a self-consistency way out of line with the other "
-                             "replicates.")
+    for item in replicates_with_flags:
+        if item[1] == REPLICATE_WARNING:
+            sys.stderr.write("%s has a self-consistency out of line with the "
+                             "other replicates.")
+        elif item[1] == REPLICATE_FAIL:
+            sys.stderr.write("%s has a self-consistency way out of line with "
+                             "the other replicates.")
+
 
 def _original_replicate_threshold(replicate_peak_files, npeaks):
     if not replicate_peak_files:
         return [0]
     peaks = count_replicate_peaks(replicate_peak_files, npeaks)
     return [max(peaks)]
+
 
 def _pooled_pseudoreplicate_threshold(pooled_pseudo_peak_file, npeaks):
     return count_pooled_replicate_peaks(pooled_pseudo_peak_file, npeaks)
