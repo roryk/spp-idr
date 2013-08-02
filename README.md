@@ -1,7 +1,30 @@
 ### spp-idr: a wrapper around peak callers and IDR for performing peak analyses
 This repo probably should get renamed, as it has expanded past using just SPP.
 
-Two peaks callers can be used:
+#### Overview
+Calling peaks from NGS data, be it from CHIP-seq, PAR-CLIP, RIP-seq, IMPACT-seq or other flavors
+is super tricky and prone to generating false positives. It is important to be able to not only call
+peaks but call peaks that are reproducible amongst biological replicates. The issue that IDR 
+(irreproducible discovery rate) tries to solve is how to flag peaks which are not reproducible amongst
+replicates but without crushing your ability to detect peaks.
+
+Anshul explains the purpose of IDR more eloquently:
+
+>Reproducibility is essential to reliable scientiﬁc discovery in high-throughput experiments. The IDR (Irreproducible Discovery Rate) framework is a uniﬁed approach to measure the reproducibility of ﬁndings identiﬁed from replicate experiments and provide highly stable thresholds based on reproducibility. Unlike the usual scalar measures of reproducibility, the IDR approach creates a curve, which quantitatively assesses when the ﬁndings are no longer consistent across replicates. In layman's terms, the IDR method compares a pair of ranked lists of identifications (such as ChIP-seq peaks). These ranked lists should not be pre-thresholded i.e. they should provide identifications across the entire spectrum of high confidence/enrichment (signal) and low confidence/enrichment (noise). The IDR method then fits the bivariate rank distributions over the replicates in order to separate signal from noise based on a defined confidence of rank consistency and reproducibility of identifications i.e the IDR threshold.
+
+
+#### Problem this repo solves
+Preparing everything and running IDR is a pain; Anshul solved part of the pain by writing wrappers around
+the IDR repo in Bioconductor, but still requires a bunch of annoying steps to run. You have to take your BAM 
+files of alignments and split them and combine them in various ways to generate the psuedoreplicates and
+pooled replicates to call IDR on. The peaks output must be in the narrowPeak format, which not all 
+peak callers generate. This repo wraps up the workflow sketched out here: 
+
+https://sites.google.com/site/anshulkundaje/projects/idr 
+
+into something that is much easier to run.
+
+Two peak callers can be used, more can be added pretty easily though:
 
 - SPP for performing peak calls on punctate chromatin marks for CHIP-seq experiments.
 - clipper for performing peak calls on RNA binding experiments such as CLIP-seq or
@@ -15,9 +38,6 @@ replicates.
 This is a simplified implementation of the workflow sketched out here:
 https://sites.google.com/site/anshulkundaje/projects/idr
 
-Anshul explains the purpose of IDR well:
-
->Reproducibility is essential to reliable scientiﬁc discovery in high-throughput experiments. The IDR (Irreproducible Discovery Rate) framework is a uniﬁed approach to measure the reproducibility of ﬁndings identiﬁed from replicate experiments and provide highly stable thresholds based on reproducibility. Unlike the usual scalar measures of reproducibility, the IDR approach creates a curve, which quantitatively assesses when the ﬁndings are no longer consistent across replicates. In layman's terms, the IDR method compares a pair of ranked lists of identifications (such as ChIP-seq peaks). These ranked lists should not be pre-thresholded i.e. they should provide identifications across the entire spectrum of high confidence/enrichment (signal) and low confidence/enrichment (noise). The IDR method then fits the bivariate rank distributions over the replicates in order to separate signal from noise based on a defined confidence of rank consistency and reproducibility of identifications i.e the IDR threshold.
 
 An intuitive overview of IDR can be found here:
 http://www.personal.psu.edu/users/q/u/qul12/IDR101.pdf
@@ -63,3 +83,4 @@ which are important to look at to determine if the correct fragment length was
 calculated. You should look at those and make sure they look correct, otherwise
 you might end up analyzing a lot of noisy garbage. The documentation for SPP has
 more information about these plots.
+
