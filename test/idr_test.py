@@ -23,6 +23,7 @@ queue = "hsph"
 jobs = 5
 NPEAKS = 300000
 DATA_URL = "https://dl.dropboxusercontent.com/u/2822886/spp/spp_idr_test_data.tar.gz"
+caller = "spp"
 
 
 class TestBamfileOperations(unittest.TestCase):
@@ -156,9 +157,6 @@ def test_run_idr():
     indiv, pseudo, pool_pseudo = idr.run_idr(individual_peaks, pseudo_peaks,
                                              pooled_pseudo, idr_runner)
 
-    print indiv
-    print pseudo
-    print pool_pseudo
     assert all(map(idr.file_exists, indiv))
     assert all(map(idr.file_exists, list(idr.flatten(pooled_pseudo))))
     assert all(map(idr.file_exists, pool_pseudo))
@@ -223,7 +221,8 @@ def test_run_analysis_no_replicates():
     with cluster_view(scheduler, queue, jobs) as view:
         plots, filtered_files = idr.run_analysis(tmp_control, tmp_exp,
                                                  spp_path, idr_runner_path,
-                                                 idr_plotter_path, view.map)
+                                                 idr_plotter_path, view.map,
+                                                 caller)
 
     all(map(idr.file_exists, filtered_files))
 
@@ -233,7 +232,8 @@ def test_run_analysis():
     with cluster_view(scheduler, queue, jobs) as view:
         plots, filtered_files = idr.run_analysis(tmp_control, tmp_exp,
                                                  spp_path, idr_runner_path,
-                                                 idr_plotter_path, view.map)
+                                                 idr_plotter_path, view.map,
+                                                 caller)
 
     all(map(idr.file_exists, filtered_files))
 

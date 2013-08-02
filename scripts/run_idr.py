@@ -4,14 +4,12 @@ from cluster_helper.cluster import cluster_view
 from spp_idr import idr
 import os
 
-def main(control, experimental, tool_path, mapper):
+def main(control, experimental, tool_path, mapper, caller, cores_per_job):
     spp_path = os.path.join(tool_path, "phantompeakqualtools", "run_spp.R")
     idr_runner_path = os.path.join(tool_path, "idrCode", "batch-consistency-analysis.r")
     idr_plotter_path = os.path.join(tool_path, "idrCode", "batch-consistency-plot.r")
-    peak_caller = idr.SPPPeakCaller(spp_path)
-    peak_caller.set_map_function(mapper)
     peaks = idr.run_analysis(control, experimental, spp_path, idr_runner_path,
-                             idr_plotter_path, mapper)
+                             idr_plotter_path, mapper, caller, cores_per_job)
 
 
 if __name__ == "__main__":
@@ -23,6 +21,10 @@ if __name__ == "__main__":
     parser.add_argument('--torque-queue', help="Torque queue name")
     parser.add_argument('--num-jobs', default=1, help="number of parallel jobs to run",
                         type=int)
+    parser.add_argument('--caller', default="spp", help="Peak caller to run "
+                        "(spp or clipper)")
+    parser.add_argument('--cores-per-job', default=1, type=int,
+                        help="Number of cores to run for each job.")
     parser.add_argument('tool_path', help="Path to spp and idr installation.")
     args = parser.parse_args()
 
@@ -30,13 +32,20 @@ if __name__ == "__main__":
     args.experimental = map(os.path.abspath, args.experimental)
 
     if args.lsf_queue:
-        with cluster_view("LSF", args.lsf_queue, args.num_jobs) as view:
-            main(args.control, args.experimental, args.tool_path, view.map)
+        with cluster_view("LSF", args.lsf_queue, args.num_jobs,
+                          cores_per_job=args.cores_per_job) as view:
+            main(args.control, args.experimental, args.tool_path, view.map,
+                 args.caller, args.cores_per_job)
     elif args.sge_queue:
-        with cluster_view("LSF", args.lsf_queue, args.num_jobs) as view:
-            main(args.control, args.experimental, args.tool_path, view.map)
+        with cluster_view("LSF", args.lsf_queue, args.num_jobs,
+                          cores_per_job=args.cores_per_job) as view:
+            main(args.control, args.experimental, args.tool_path, view.map,
+                 args.caller, args.cores_per_job)
     elif args.torque_queue:
-        with cluster_view("LSF", args.lsf_queue, args.num_jobs) as view:
-            main(args.control, args.experimental, args.tool_path, view.map)
+        with cluster_view("LSF", args.lsf_queue, args.num_jobs,
+                          cores_per_job=args.cores_per_job) as view:
+            main(args.control, args.experimental, args.tool_path, view.map,
+                 args.caller, args.cores_per_job)
     else:
-        main(args.control, args.experimental, args.tool_path, map)
+        main(args.control, args.experimental, args.tool_path, map,
+             args.caller, args.cores_per_job)

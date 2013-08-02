@@ -9,6 +9,9 @@ import gzip
 import collections
 import csv
 import pandas as pd
+import tempfile
+import pybedtools
+
 
 """
 From: http://genome.ucsc.edu/FAQ/FAQformat.html#format12
@@ -65,20 +68,35 @@ NPEAKS = 300000
 
 
 def run_analysis(control_files, experimental_files, spp_path,
-                 idr_runner_path, idr_plotter_path, mapper):
+                 idr_runner_path, idr_plotter_path, mapper, caller,
+                 cores_per_job=1):
 
     # convert to tagalign
-    print "Converting BAM files to tagAlign if necessary."
-    control, experimental = map_2d(bam_to_tagalign,
-                                   [control_files, experimental_files],
-                                   mapper)
 
-    print "Calling peaks, this will take a while."
+    print "Calling peaks with %s, this will take a while." % (caller)
     # call peaks
-    peak_caller = spp_peak_caller(spp_path, cores=1)
+    if caller == "clipper":
+        peak_caller = clipper_peak_caller(cores=cores_per_job)
+        pooler = bam_pool
+        splitter = bam_split
+        control = control_files
+        experimental = experimental_files
+    elif caller == "spp":
+        peak_caller = spp_peak_caller(spp_path, cores=cores_per_job)
+        pooler = tagalign_pool
+        splitter = tagalign_split
+        control, experimental = map_2d(bam_to_tagalign,
+                                       [control_files, experimental_files],
+                                       mapper)
+    else:
+        print "Unknown caller specified %s." % (caller)
+        sys.exit(1)
+
     i_peaks, p_peaks, pseudo_peaks, pp_peaks = call_peaks(control,
                                                           experimental,
                                                           peak_caller,
+                                                          pooler,
+                                                          splitter,
                                                           mapper)
     # run idr
     print "Performing IDR analysis."
@@ -99,19 +117,25 @@ def run_analysis(control_files, experimental_files, spp_path,
     return plots, filtered_files
 
 
-def call_peaks(controls, experimental, peak_caller, mapper=map):
+def call_peaks(controls, experimental, peak_caller, pooler, splitter, mapper=map):
+    odir = _get_subdir(controls[0], "peaks")
+    safe_makedir(odir)
     individual_peaks = call_peaks_on_individual_replicates(controls,
                                                            experimental,
-                                                           peak_caller, mapper)
+                                                           peak_caller, mapper,
+                                                           pooler, splitter)
     pooled_peaks = call_peaks_on_pooled_replicates(controls,
                                                    experimental,
-                                                   peak_caller, mapper)
+                                                   peak_caller, mapper,
+                                                   pooler, splitter)
     pseudo_peaks = call_peaks_on_pseudo_replicates(controls,
                                                    experimental,
-                                                   peak_caller, mapper)
+                                                   peak_caller, mapper,
+                                                   pooler, splitter)
     pooled_pseudo_peaks = call_peaks_on_pooled_pseudoreplicates(controls,
                                                                 experimental,
-                                                                peak_caller, mapper)
+                                                                peak_caller, mapper,
+                                                                pooler, splitter)
     return individual_peaks, pooled_peaks, pseudo_peaks, pooled_pseudo_peaks
 
 
@@ -276,29 +300,33 @@ def idr_on_peak_files(peak_files, idr_runner, subdir):
     out_files = map(idr_runner, pairs_to_run, [subdir] * len(pairs_to_run))
     return out_files
 
-def call_peaks_on_pseudo_replicates(controls, experimental, peak_caller, mapper):
-    pooled_controls = tagalign_pool(controls)
-    pseudo_replicates = mapper(tagalign_split, experimental)
+def call_peaks_on_pseudo_replicates(controls, experimental, peak_caller, mapper,
+                                    pooler, splitter):
+    pooled_controls = pooler(controls)
+    pseudo_replicates = mapper(splitter, experimental)
     flat_replicates = list(flatten(pseudo_replicates))
     peaks = mapper(peak_caller, [pooled_controls] * len(flat_replicates),
                 flat_replicates)
     return bunch(peaks)
 
-def call_peaks_on_individual_replicates(controls, experimental, peak_caller, mapper):
-    pooled_controls = tagalign_pool(controls)
+def call_peaks_on_individual_replicates(controls, experimental, peak_caller, mapper,
+                                        pooler, splitter):
+    pooled_controls = pooler(controls)
     peaks = mapper(peak_caller, [pooled_controls] * len(experimental), experimental)
     return peaks
 
-def call_peaks_on_pooled_replicates(controls, experimental, peak_caller, mapper):
-    pooled_controls = tagalign_pool(controls)
-    pooled_experimental = tagalign_pool(experimental)
+def call_peaks_on_pooled_replicates(controls, experimental, peak_caller, mapper,
+                                    pooler, splitter):
+    pooled_controls = pooler(controls)
+    pooled_experimental = pooler(experimental)
     peaks = mapper(peak_caller, [pooled_controls], [pooled_experimental])
     return peaks
 
-def call_peaks_on_pooled_pseudoreplicates(controls, experimental, peak_caller, mapper):
-    pooled_controls = tagalign_pool(controls)
-    pooled_experimental = tagalign_pool(experimental)
-    pseudo_replicates = tagalign_split(pooled_experimental)
+def call_peaks_on_pooled_pseudoreplicates(controls, experimental, peak_caller, mapper,
+                                          pooler, splitter):
+    pooled_controls = pooler(controls)
+    pooled_experimental = pooler(experimental)
+    pseudo_replicates = splitter(pooled_experimental)
     peaks = mapper(peak_caller, [pooled_controls] * len(pseudo_replicates),
                 pseudo_replicates)
     return peaks
@@ -316,6 +344,10 @@ def call_peaks_on_pooled_pseudoreplicates(controls, experimental, peak_caller, m
 # use this for now until IPython that can pickle closures is released
 def spp_peak_caller(spp_path, npeak=300000, cores=1):
     peak_caller = SPPPeakCaller(spp_path, npeak, cores)
+    return peak_caller
+
+def clipper_peak_caller(cores=1):
+    peak_caller = ClipperCaller(cores)
     return peak_caller
 
 def idr_runner(idr_runner_path):
@@ -374,15 +406,54 @@ def regionpeak_to_bed(in_file, out_file=None):
                                         split[3], split[6]]) + "\n")
     return out_file
 
+def bam_pool(in_files, out_file=None):
+    if out_file is None:
+        base, ext = os.path.splitext(in_files[0])
+        out_file = base + "_pooled" + ext
+    out_base, _ = os.path.splitext(out_file)
+    if file_exists(out_file):
+        pysam.index(out_file)
+        return out_file
+    samfile = pysam.Samfile(in_files[0], "rb")
+    tmp_file = out_file + "tmp"
+    outfile = pysam.Samfile(tmp_file, "wb", template=samfile)
+    samfile.close()
+    for f in in_files:
+        samfile = pysam.Samfile(f, "rb")
+        for read in samfile:
+            outfile.write(read)
+        samfile.close()
+    outfile.close()
+    pysam.sort(tmp_file, out_base)
+    pysam.index(out_file)
+    return out_file
+
+
+def bam_split(in_file, nfiles=2):
+    out_files = _get_split_files(in_file, nfiles)
+    out_bases = [os.path.splitext(x)[0] for x in out_files]
+    tmp_files = [x + "tmp" for x in out_files]
+    samfile = pysam.Samfile(in_file, "rb")
+    out_handles = [pysam.Samfile(x, "wb", template=samfile) for x in tmp_files]
+    for read in samfile:
+        out_handles[random.randint(0, nfiles-1)].write(read)
+    samfile.close()
+    [x.close() for x in out_handles]
+    [pysam.sort(tmp_files[x], out_bases[x]) for x in range(nfiles)]
+    [pysam.index(x) for x in out_files]
+    return out_files
+
+
 def tagalign_split(in_file, nfiles=2):
     "split a tagalign file into nfiles number of files, randomly writing reads"
-    out_files = _get_tagalign_split_files(in_file, nfiles)
+    out_files = _get_split_files(in_file, nfiles)
     out_handles = [open(x, "w") for x in out_files]
     with open(in_file) as in_handle:
         for read in in_handle:
             out_handles[random.randint(0, nfiles - 1)].write(read)
     [x.close() for x in out_handles]
     return out_files
+
 
 def tagalign_pool(in_files, out_file=None):
     if out_file is None:
@@ -395,7 +466,7 @@ def tagalign_pool(in_files, out_file=None):
                     out_handle.write(read)
     return out_file
 
-def _get_tagalign_split_files(in_file, nfiles=2):
+def _get_split_files(in_file, nfiles=2):
     base, ext = os.path.splitext(in_file)
     fmt = "{0}_{1}{2}"
     out_files = [fmt.format(base, x, ext) for x in range(nfiles)]
@@ -488,9 +559,92 @@ def is_gzip(fname):
     else:
         return False
 
-# this is here for now to get around IPython < 1.0 not being able to pickle closures.
-class SPPPeakCaller(object):
+## the peak caller classes exist to get around the inability of ipython < 1.0
+## to pickle closures
 
+
+class ClipperCaller(object):
+    """
+    Call peaks with clipper
+    homepage: https://github.com/YeoLab/clipper/wiki/CLIPper-Home
+
+    This is suitable for RNA-based pulldowns like CLIP-seq and
+    IMPACT-seq, possibly among others. Do not use this for CHIP-seq!
+
+    Since Clipper cannot take a control file we will hack in support
+    by only reporting peaks in the experimental files which do not
+    appear in the pooled control files.
+    """
+
+    def __init__(self, cores=1):
+        self.cores = cores
+        self.map = map
+
+    def _get_comparison_name(self, control_file, experimental_file):
+        cbase, _ = os.path.splitext(control_file)
+        ebase, _ = os.path.splitext(experimental_file)
+        comparisons = map(os.path.basename, [ebase, cbase])
+        return "_VS_".join(comparisons)
+
+    def _get_peaks_file(self, control, experimental):
+        odir = _get_subdir(control, "peaks")
+        out_file = (self._get_comparison_name(control, experimental) +
+                    ".narrowPeak")
+        return os.path.join(odir, out_file)
+
+    def _call_peaks(self, cmd):
+        return subprocess.check_call(cmd, shell=True)
+
+    def _clipper_to_narrowpeak(self, peak_file, out_file):
+        """
+        convert Clipper peaks to narrowpeak format
+        """
+        CLIPPER_HEADER = ["chrom", "chromStart", "chromEnd", "name",
+                          "pval", "strand", "thick_start", "thick_stop"]
+        if file_exists(out_file):
+            return out_file
+
+        with open(peak_file) as in_handle, open(out_file, "w") as out_handle:
+            for line in in_handle:
+                linedict = dict(zip(CLIPPER_HEADER, line.split("\t")))
+                out_line = "\t".join([linedict["chrom"], linedict["chromStart"],
+                                      linedict["chromEnd"], linedict["name"],
+                                      linedict["pval"], linedict["strand"],
+                                      linedict["pval"], linedict["pval"],
+                                      linedict["pval"],
+                                      "-1"]) + "\n"
+                out_handle.write(out_line)
+        return out_file
+
+
+    def __call__(self, control, experimental):
+        cores = self.cores
+        peaks_file = self._get_peaks_file(control, experimental)
+        odir = _get_subdir(control, "peaks")
+        if file_exists(peaks_file):
+            return peaks_file
+        comp_name = self._get_comparison_name(control, experimental)
+        exp_peaks_file = os.path.join(odir, comp_name + "experimental.peaks")
+        control_peaks_file = os.path.join(odir, comp_name + "control.peaks")
+        control_cmd = ("clipper --superlocal --poisson-cutoff 1 "
+                       "--processors {cores} -b {experimental} -s hg19 "
+                       "-o {control_peaks_file}")
+        self.map(self._call_peaks, [control_cmd.format(**locals())])
+
+        exp_cmd = ("clipper --superlocal --poisson-cutoff 1 "
+                   "--processors {cores} -b {control} -s hg19 "
+                   "-o {exp_peaks_file}")
+        self.map(self._call_peaks, [exp_cmd.format(**locals())])
+
+        # keep only the peaks specific to the experimental file
+        exp_bedtool = pybedtools.BedTool(exp_peaks_file)
+        control_bedtool = pybedtools.BedTool(control_peaks_file)
+        clipper_peaks = (exp_bedtool - control_bedtool).fn
+
+        return self._clipper_to_narrowpeak(clipper_peaks, peaks_file)
+
+
+class SPPPeakCaller(object):
     def __init__(self, spp_path, npeaks=NPEAKS, cores=1):
         self.spp_path = spp_path
         self.npeaks = npeaks
