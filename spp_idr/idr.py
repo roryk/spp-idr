@@ -9,7 +9,6 @@ import gzip
 import collections
 import csv
 import pandas as pd
-import tempfile
 import pybedtools
 
 
@@ -108,8 +107,10 @@ def run_analysis(control_files, experimental_files, spp_path,
 
     print "Filtering peaks using the cutoffs determined by IDR."
     # filter peaks
-    filtered_files = filter_peaks(p_peaks, (i_idr, pseudo_idr, pp_idr),
-                                  peak_caller.npeaks)
+    peak_file = p_peaks[0]
+    npeaks = count_peaks(peak_file)
+    filtered_files = filter_peaks(peak_file, (i_idr, pseudo_idr, pp_idr),
+                                  npeaks)
     print "Converting to BED format for use in IGV."
     map(regionpeak_to_bed, filtered_files)
 
@@ -140,13 +141,21 @@ def call_peaks(controls, experimental, peak_caller, pooler, splitter, mapper=map
 
 
 def filter_peaks(peak_file, idr_set, npeaks):
-    peak_file = gunzip(peak_file[0])
+    peak_file = gunzip(peak_file)
     sorted_peak_file = sort_peak_file(peak_file)
     conservative, optimum = get_filter_thresholds(idr_set, npeaks)
     conservative_peak_file = filter_peak_file(sorted_peak_file, conservative,
                                               "-conservative")
     optimum_peak_file = filter_peak_file(sorted_peak_file, optimum, "-optimum")
     return conservative_peak_file, optimum_peak_file
+
+def count_peaks(peak_file):
+    peak_file = gunzip(peak_file[0])
+    npeaks = 0
+    with open(peak_file) as in_handle:
+        for line in in_handle:
+            npeaks += 1
+    return npeaks
 
 def sort_peak_file(peak_file):
     base, ext = os.path.splitext(peak_file)
@@ -506,7 +515,7 @@ def is_samfile(in_file):
 
 def is_regionpeakfile(in_file):
     _, ext = os.path.splitext(in_file)
-    return ext == ".regionPeak"
+    return ext == ".regionPeak" or ext == ".narrowPeak"
 
 def _open_sam_or_bam(in_file):
     if is_samfile(in_file):
@@ -627,12 +636,12 @@ class ClipperCaller(object):
         exp_peaks_file = os.path.join(odir, comp_name + "experimental.peaks")
         control_peaks_file = os.path.join(odir, comp_name + "control.peaks")
         control_cmd = ("clipper --superlocal --poisson-cutoff 1 "
-                       "--processors {cores} -b {experimental} -s hg19 "
+                       "--processors {cores} -b {control} -s hg19 "
                        "-o {control_peaks_file}")
         self.map(self._call_peaks, [control_cmd.format(**locals())])
 
         exp_cmd = ("clipper --superlocal --poisson-cutoff 1 "
-                   "--processors {cores} -b {control} -s hg19 "
+                   "--processors {cores} -b {experimental} -s hg19 "
                    "-o {exp_peaks_file}")
         self.map(self._call_peaks, [exp_cmd.format(**locals())])
 
